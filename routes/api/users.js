@@ -7,6 +7,11 @@ const jwt =require('jsonwebtoken');
 const keys= require('../../config/keys');
 const passport= require('passport');
 
+
+// Load Input Validation
+const validateRegisterInput = require('../../validation/register');
+const validateLoginInput = require('../../validation/login');
+
 //Load User Model
 //then we can use 'User' for any mongoose method that it has
 const User= require('../../models/Users.js');
@@ -17,109 +22,110 @@ const User= require('../../models/Users.js');
 //@desc    Tests users route   --- gives the description of what it does
 //@access  Public             --- some routes are going to be protected but access is public route
 router.get('/test', (req, res)=> res.json({msg: 'User Works'}));
+// @route   GET api/users/register
+// @desc    Register user
+// @access  Public
+router.post('/register', (req, res) => {
+  const { errors, isValid } = validateRegisterInput(req.body);
 
-//@Routes  GET api/users/register
-//@desc    Register user  
-//@access  Public       
+  // Check Validation
+  if (!isValid) {
+    return res.status(400).json(errors);
+  }
 
-//finOne() will check if db contains any such already present email
-// we'll send objects in it where we say we wanna find an email that matches 
-// hen we send data to the route thru a post request which will ultimately be in a form in a react application 
-// or here postman, in either ay we acess it with req.body.whateverforminputname  
-router.post('/register', (req,res)=> {
-User.findOne({ email: req.body.email})
-.then(user => {
-    if(user){
-        return res.status(400).json({email: 'Email already exists'});
-    }
-    else
-    {
-        const avatar=gravatar.url(req.body.email, {
-            s:'200', //size
-            r:'pg', //Rating
-            d:'mm', // Default
-        });
-    const newUser= new User({
+  User.findOne({ email: req.body.email }).then(user => {
+    if (user) {
+      errors.email = 'Email already exists';
+      return res.status(400).json(errors);
+    } else {
+      const avatar = gravatar.url(req.body.email, {
+        s: '200', // Size
+        r: 'pg', // Rating
+        d: 'mm' // Default
+      });
+
+      const newUser = new User({
         name: req.body.name,
-        email:req.body.email,
+        email: req.body.email,
         avatar,
         password: req.body.password
-    });
+      });
 
-    bcrypt.genSalt(10, (err, salt)=>{
-        bcrypt.hash(newUser.password, salt, (err, hash)=>{
-            if(err) throw err;
-            newUser.password=hash;
-
-            newUser.save()
-            .then(user=>res.json(user))
-            .catch(err=> console.log(err));
+      bcrypt.genSalt(10, (err, salt) => {
+        bcrypt.hash(newUser.password, salt, (err, hash) => {
+          if (err) throw err;
+          newUser.password = hash;
+          newUser
+            .save()
+            .then(user => res.json(user))
+            .catch(err => console.log(err));
         });
+      });
+    }
+  });
+});
+
+// @route   GET api/users/login
+// @desc    Login User / Returning JWT Token
+// @access  Public
+router.post('/login', (req, res) => {
+  const { errors, isValid } = validateLoginInput(req.body);
+
+  // Check Validation
+  if (!isValid) {
+    return res.status(400).json(errors);
+  }
+
+  const email = req.body.email;
+  const password = req.body.password;
+
+  // Find user by email
+  User.findOne({ email }).then(user => {
+    // Check for user
+    if (!user) {
+      errors.email = 'User not found';
+      return res.status(404).json(errors);
+    }
+
+    // Check Password
+    bcrypt.compare(password, user.password).then(isMatch => {
+      if (isMatch) {
+        // User Matched
+        const payload = { id: user.id, name: user.name, avatar: user.avatar }; // Create JWT Payload
+
+        // Sign Token
+        jwt.sign(
+          payload,
+          keys.secretOrKey,
+          { expiresIn: 3600 },
+          (err, token) => {
+            res.json({
+              success: true,
+              token: 'Bearer ' + token
+            });
+          }
+        );
+      } else {
+        errors.password = 'Password incorrect';
+        return res.status(400).json(errors);
+      }
     });
-}
-});
-});
-
-
-//@Routes  GET api/users/login
-//@desc   login user /Returing JWT token 
-//@access  Public   
-
-router.post('/login',(req, res)=>{
-    const email= req.body.email;
-    const password = req.body.password;
-
-    //Find user by email
-    User.findOne({email})  //can write (email: email) since they have the same name so written once
-    .then(user=>{
-        if(!user){
-            return res.status(404).json({email:'User email not found'});
-            
-        }
-
-         //check password 
-         //since hashed password saved in databse so using bcrypt to get the string value
-         bcrypt.compare(password,user.password).then(isMatch=>{
-
-            if(isMatch){
-                //User matched            
-                const payload= { id: user.id , name: user.name, avatar: user.avatar}//created jwt payload
-
-                 //Sign token
-                jwt.sign(
-                payload,
-                keys.secretOrKey,
-                {expiresIn: 3600} , 
-                (err, token)=> {
-                res.json({
-                    success:true,
-                    token: 'Bearer' +token
-                });
-        });
-             }
-             else{
-                 return res.status(404).json({password: 'Password Incorrect'});
-             }
-
-         });
-             
-         
-        
-    });
+  });
 });
 
-//@Routes  GET api/users/current
-//@desc    Return current user  
-//@access  Private
+// @route   GET api/users/current
+// @desc    Return current user
+// @access  Private
 router.get(
-    '/current', 
-    passport.authenticate('jwt', {session: false}), (req,res)=>{
+  '/current',
+  passport.authenticate('jwt', { session: false }),
+  (req, res) => {
     res.json({
-        id:req.user.id,
-        name:req.user.name,
-        email: req.user.email
+      id: req.user.id,
+      name: req.user.name,
+      email: req.user.email
     });
-}
-); 
+  }
+);
 
-module.exports=router;
+module.exports = router;
